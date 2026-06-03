@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Timetable Generator</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 1000px;
+        margin: 30px auto;
+        padding: 0 16px;
+        color: #222;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin-bottom: 4px;
+      }
+      p.sub {
+        color: #666;
+        font-size: 0.9rem;
+        margin-bottom: 24px;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #ccc;
+        margin: 20px 0;
+      }
+
+      label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 6px;
+      }
+      input[type="file"] {
+        margin-bottom: 10px;
+      }
+      button {
+        padding: 7px 18px;
+        font-size: 0.9rem;
+        cursor: pointer;
+        margin-right: 8px;
+      }
+
+      .error {
+        color: red;
+        font-size: 0.9rem;
+        margin: 8px 0;
+      }
+      .info {
+        color: #555;
+        font-size: 0.85rem;
+        margin: 8px 0;
+      }
+
+      #class-list {
+        margin: 10px 0 16px;
+      }
+      #class-list label {
+        font-weight: normal;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin: 4px 12px 4px 0;
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 14px;
+      }
+      .tab-btn {
+        padding: 5px 14px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        border: 1px solid #aaa;
+        background: #f5f5f5;
+      }
+      .tab-btn.active {
+        background: #222;
+        color: #fff;
+        border-color: #222;
+      }
+
+      .panel {
+        display: none;
+      }
+      .panel.active {
+        display: block;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.85rem;
+      }
+      th {
+        background: #222;
+        color: #fff;
+        padding: 8px 10px;
+        text-align: center;
+      }
+      th:first-child {
+        text-align: left;
+      }
+      td {
+        border: 1px solid #ccc;
+        padding: 8px 10px;
+        text-align: center;
+        vertical-align: middle;
+      }
+      td:first-child {
+        background: #f9f9f9;
+        font-size: 0.78rem;
+        text-align: left;
+        white-space: nowrap;
+      }
+      tr.lunch td {
+        background: #f0f0f0;
+        color: #666;
+        font-size: 0.78rem;
+      }
+      td.free {
+        color: #bbb;
+      }
+
+      @media print {
+        button,
+        .tabs,
+        h1,
+        p.sub,
+        hr,
+        #upload-section,
+        #class-section {
+          display: none !important;
+        }
+        .panel {
+          display: block !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Timetable Generator</h1>
+    <p class="sub">
+      9:00 AM – 4:00 PM &nbsp;|&nbsp; 6 periods &nbsp;|&nbsp; Lunch 12:00–1:00
+      PM
+    </p>
+
+    <div id="upload-section">
+      <label for="file-input">Upload schedule file (.csv or .xlsx):</label>
+      <input type="file" id="file-input" accept=".csv,.xlsx,.xls" />
+      <button id="preview-btn" disabled>Load Classes</button>
+      <div class="error" id="err"></div>
+    </div>
+
+    <hr />
+
+    <div id="class-section" style="display: none">
+      <label>Select classes to schedule:</label>
+      <div id="class-list"></div>
+      <button id="select-all">Select All</button>
+      <button id="clear-all">Clear All</button>
+      <br /><br />
+      <button id="generate-btn">Generate Timetables</button>
+      <div class="info" id="info"></div>
+    </div>
+
+    <div id="output" style="display: none">
+      <hr />
+      <div
+        style="
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 12px;
+        "
+      >
+        <strong id="output-title"></strong>
+        <button onclick="window.print()">Print</button>
+      </div>
+      <div class="tabs" id="tabs"></div>
+      <div id="panels"></div>
+    </div>
+
+    <script>
+      const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+      const PERIODS = [1, 2, 3, 4, 5, 6];
+      const LUNCH_AFTER = 3;
+
+      const PERIOD_STARTS = [9, 10, 11, 13, 14, 15];
+
+      function periodLabel(p) {
+        const h = PERIOD_STARTS[p - 1];
+        return fmt(h) + " – " + fmt(h + 1);
+      }
+      function fmt(h) {
+        const ampm = h >= 12 ? "PM" : "AM";
+        const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+        return h12 + ":00 " + ampm;
+      }
+
+      const fileInput = document.getElementById("file-input");
+      const previewBtn = document.getElementById("preview-btn");
+      const errEl = document.getElementById("err");
+      const infoEl = document.getElementById("info");
+      let currentFile = null;
+
+      fileInput.addEventListener("change", function () {
+        currentFile = fileInput.files[0] || null;
+        previewBtn.disabled = !currentFile;
+        errEl.textContent = "";
+        document.getElementById("class-section").style.display = "none";
+        document.getElementById("output").style.display = "none";
+      });
+
+      previewBtn.addEventListener("click", async function () {
+        errEl.textContent = "";
+        previewBtn.textContent = "Loading…";
+        previewBtn.disabled = true;
+        const fd = new FormData();
+        fd.append("file", currentFile);
+        try {
+          const res = await fetch("/preview", { method: "POST", body: fd });
+          const data = await res.json();
+          if (data.error) {
+            errEl.textContent = data.error;
+            return;
+          }
+          renderChips(data.classes);
+        } catch (e) {
+          errEl.textContent = "Error: " + e.message;
+        } finally {
+          previewBtn.textContent = "Load Classes";
+          previewBtn.disabled = false;
+        }
+      });
+
+      function renderChips(classes) {
+        const list = document.getElementById("class-list");
+        list.innerHTML = "";
+        Object.entries(classes).forEach(function ([name, info]) {
+          const lbl = document.createElement("label");
+          lbl.innerHTML =
+            '<input type="checkbox" value="' +
+            name +
+            '" checked /> ' +
+            name +
+            " (" +
+            info.total_hours +
+            "h/wk, " +
+            info.subjects.length +
+            " subjects)";
+          list.appendChild(lbl);
+        });
+        document.getElementById("class-section").style.display = "block";
+      }
+
+      document
+        .getElementById("select-all")
+        .addEventListener("click", function () {
+          document.querySelectorAll("#class-list input").forEach(function (c) {
+            c.checked = true;
+          });
+        });
+      document
+        .getElementById("clear-all")
+        .addEventListener("click", function () {
+          document.querySelectorAll("#class-list input").forEach(function (c) {
+            c.checked = false;
+          });
+        });
+
+      document
+        .getElementById("generate-btn")
+        .addEventListener("click", async function () {
+          const selected = Array.from(
+            document.querySelectorAll("#class-list input:checked"),
+          );
+          if (!selected.length) {
+            infoEl.textContent = "Please select at least one class.";
+            return;
+          }
+          infoEl.textContent = "";
+          errEl.textContent = "";
+          const fd = new FormData();
+          fd.append("file", currentFile);
+          selected.forEach(function (cb) {
+            fd.append("classes", cb.value);
+          });
+          const btn = document.getElementById("generate-btn");
+          btn.textContent = "Generating…";
+          btn.disabled = true;
+          try {
+            const res = await fetch("/generate", { method: "POST", body: fd });
+            const data = await res.json();
+            if (data.error) {
+              infoEl.textContent = data.error;
+              return;
+            }
+            renderOutput(data);
+          } catch (e) {
+            infoEl.textContent = "Error: " + e.message;
+          } finally {
+            btn.textContent = "Generate Timetables";
+            btn.disabled = false;
+          }
+        });
+
+      function renderOutput(data) {
+        const schedule = data.schedule;
+        const classes = data.classes;
+        document.getElementById("output-title").textContent =
+          classes.length + " class(es) scheduled";
+        const tabsEl = document.getElementById("tabs");
+        const panelsEl = document.getElementById("panels");
+        tabsEl.innerHTML = "";
+        panelsEl.innerHTML = "";
+        classes.forEach(function (cls, i) {
+          const btn = document.createElement("button");
+          btn.className = "tab-btn" + (i === 0 ? " active" : "");
+          btn.textContent = cls;
+          btn.dataset.cls = cls;
+          btn.addEventListener("click", function () {
+            document.querySelectorAll(".tab-btn").forEach(function (b) {
+              b.classList.toggle("active", b.dataset.cls === cls);
+            });
+            document.querySelectorAll(".panel").forEach(function (p) {
+              p.classList.toggle("active", p.id === "p-" + cls);
+            });
+          });
+          tabsEl.appendChild(btn);
+          const div = document.createElement("div");
+          div.className = "panel" + (i === 0 ? " active" : "");
+          div.id = "p-" + cls;
+          div.innerHTML = buildTable(cls, schedule[cls]);
+          panelsEl.appendChild(div);
+        });
+        document.getElementById("output").style.display = "block";
+        document
+          .getElementById("output")
+          .scrollIntoView({ behavior: "smooth" });
+      }
+
+      function buildTable(cls, sched) {
+        var rows = "";
+        PERIODS.forEach(function (p) {
+          rows +=
+            "<tr><td>Period " +
+            p +
+            '<br/><span style="color:#888;font-size:.75rem">' +
+            periodLabel(p) +
+            "</span></td>";
+          DAYS.forEach(function (d) {
+            var s = sched[d][p];
+            rows +=
+              s && s !== "Free"
+                ? "<td>" + s + "</td>"
+                : '<td class="free">—</td>';
+          });
+          rows += "</tr>";
+          if (p === LUNCH_AFTER) {
+            rows +=
+              '<tr class="lunch"><td>Lunch<br/><span style="font-size:.75rem">12:00 PM – 1:00 PM</span></td>' +
+              DAYS.map(function () {
+                return "<td>—</td>";
+              }).join("") +
+              "</tr>";
+          }
+        });
+        return (
+          '<h3 style="margin-bottom:10px">' +
+          cls +
+          "</h3>" +
+          "<table><thead><tr><th>Period / Time</th>" +
+          DAYS.map(function (d) {
+            return "<th>" + d + "</th>";
+          }).join("") +
+          "</tr></thead><tbody>" +
+          rows +
+          "</tbody></table>"
+        );
+      }
+    </script>
+  </body>
+</html>
